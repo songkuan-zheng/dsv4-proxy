@@ -1,0 +1,86 @@
+# Reference deployment. Point UPSTREAM at your SGLang endpoint and mount a key.
+#
+#   openssl rand -hex 32 > ./cache.key && chmod 600 ./cache.key
+#   docker compose up -d
+services:
+  dsv4-proxy:
+    build: .
+    container_name: dsv4-proxy
+    restart: unless-stopped
+    depends_on:
+      dsv4-redis:
+        condition: service_healthy
+    environment:
+      UPSTREAM: "http://sglang-router:8000"
+      PORT: "8002"
+
+      # SGLang treats a missing reasoning_effort as "none" (no thinking at all),
+      # so inject a default. Override also replaces what the client sent.
+      DEFAULT_REASONING_EFFORT: "max"
+      REASONING_EFFORT_OVERRIDE: "1"
+
+      # Restore reasoning_content the client dropped. DeepSeek's spec requires
+      # every tool-calling turn to replay it; without this the model gradually
+      # stops reasoning. See README.
+      BACKFILL_REASONING: "1"
+      BACKFILL_MAX_TURNS: "0"
+
+      # Persistence. Redis is incremental (one SET per trace) and expires keys
+      # itself; TTL is an idle timeout because reads renew it.
+      REASONING_REDIS_URL: "redis://dsv4-redis:6379"
+      REASONING_REDIS_TTL_SEC: "86400"
+      REASONING_REDIS_PREFIX: "dsv4:rc:"
+
+      # Encrypt cached reasoning at rest.
+      REASONING_CACHE_KEY_FILE: "/run/secrets/cache.key"
+
+      # Remove loop fragments the model emitted earlier, so replaying the
+      # transcript does not reinforce them.
+      SCRUB_ASSISTANT_LOOPS: "1"
+      SCRUB_MIN_REPEATS: "8"
+      SCRUB_MIN_UNIT_CHARS: "12"
+      LOOP_FREQUENCY_PENALTY: "0.1"
+
+      # Backstop: break a confirmed deadlock. Fires only after the model has
+      # actually returned an empty thinking block N times running.
+      TOOL_RESULT_NUDGE: "Think carefully about what to do next before responding."
+      NUDGE_CONSECUTIVE: "3"
+      NUDGE_MIN_TURNS: "10"
+
+      LOG_REASONING: "1"
+      DEBUG: "0"
+
+      # The cache lives on the JS heap, whose default ceiling is 4GB regardless
+      # of host memory.
+      NODE_OPTIONS: "--max-old-space-size=12288"
+    ports:
+      - "8002:8002"
+    volumes:
+      # Keep the key outside the repo so it cannot be committed, and read-only
+      # so the container cannot alter it.
+      - ./cache.key:/run/secrets/cache.key:ro
+
+  dsv4-redis:
+    image: redis:7-alpine
+    container_name: dsv4-redis
+    restart: unless-stopped
+    # TTL (set per key by the proxy) is the primary reclaim mechanism; maxmemory
+    # + LRU is a backstop against unexpected growth. AOF because the whole point
+    # of using Redis is that it rarely restarts.
+    command: >
+      redis-server
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save ""
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis-data:

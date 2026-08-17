@@ -1,0 +1,7 @@
+node_modules
+test
+bench
+docs
+.git
+.env
+*.key

@@ -1,0 +1,24 @@
+{
+  "name": "dsv4-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenAI-compatible proxy for SGLang serving DeepSeek-V4-Flash: keeps reasoning alive across long agent sessions",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/unit/*.test.js test/e2e/*.test.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:e2e": "node --test test/e2e/*.test.js",
+    "bench:redis": "node bench/redis.js",
+    "bench:crypto": "node bench/crypto.js",
+    "bench:cpu": "node bench/cpu.js",
+    "bench:rpm": "node bench/rpm.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "ioredis": "^5.4.1"
+  }
+}
